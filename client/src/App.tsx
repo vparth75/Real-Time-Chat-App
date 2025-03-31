@@ -24,15 +24,15 @@ function App() {
         type: messageType,
         payload: { roomId: currentRoomId }
       }));
-      setWebSocket(ws);
     };
-
+    
     ws.onmessage = (event) => {
       try{
         const data = JSON.parse(event.data);
         if(data.type === "assignId"){
           console.log(`Your user Id is ${data.payload.userId}`)
           setUserId(data.payload.userId);
+          setWebSocket(ws);
           ws.onmessage = null;
         }
       } catch (error){
@@ -133,7 +133,11 @@ function App() {
           <Chats ws={webSocket} ownUserId={userId}/>
         </div>
         <div className="border border-neutral-700 outline-none flex justify-center items-center rounded-lg p-2 gap-2">
-          <input className="outline-none w-full" ref={inputSendRef} placeholder='"Hi there"'></input>
+          <input className="outline-none w-full" ref={inputSendRef} placeholder='"Hi there"' onKeyDown={(e) => {
+            if(e.key === "Enter"){
+              sendMessage();
+            }
+          }}></input>
           <div className="rounded-lg bg-white p-1 flex justify-center items-center">
             <button className="cursor-pointer w-full h-full" onClick={sendMessage}><SendButton /></button>
           </div>
