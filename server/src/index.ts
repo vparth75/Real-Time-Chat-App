@@ -1,6 +1,9 @@
+import 'dotenv/config'
 import { WebSocket, WebSocketServer } from "ws";
 
-const wss = new WebSocketServer({ port: 8080 });
+const wss = new WebSocketServer({ 
+  port: parseInt(process.env.PORT || "8080")  
+});
 
 // Maps to manage rooms and user associations
 const roomMap = new Map<string, Set<WebSocket>>(); // roomId -> Set<WebSocket>
