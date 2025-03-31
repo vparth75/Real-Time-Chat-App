@@ -2,134 +2,172 @@ import { WebSocket, WebSocketServer } from "ws";
 
 const wss = new WebSocketServer({ port: 8080 });
 
-const roomMap = new Map<string, Set<WebSocket>>();
-const socketRoomMap = new Map<WebSocket, string>();
-let userIdCounter = 0;
-const socketToUserId = new Map<WebSocket, number>();
+// Maps to manage rooms and user associations
+const roomMap = new Map<string, Set<WebSocket>>(); // roomId -> Set<WebSocket>
+const socketRoomMap = new Map<WebSocket, string>(); // WebSocket -> roomId
+let userIdCounter = 0; // Simple counter for assigning unique user IDs
+const socketToUserId = new Map<WebSocket, number>(); // WebSocket -> userId
 
 wss.on("connection", (socket: WebSocket) => {
-  console.log(`user connected`)
+  console.log(`User connected`);
 
   const userId = userIdCounter++;
   socketToUserId.set(socket, userId);
   console.log(`Assigned user ${userId} to new connection`);
 
+  // Send the assigned user ID back to the client
   socket.send(JSON.stringify({
     type: "assignId",
     payload: { userId }
-  }))
+  }));
 
   socket.on("message", (message: string) => {
     try{
-
       const parsedMessage = JSON.parse(message);
-      console.log(parsedMessage);
 
+      // Handle room creation
       if(parsedMessage.type === "create"){
         const roomId = parsedMessage.payload.roomId;
-        console.log(`User created room: ${roomId}`);
+        const senderId = socketToUserId.get(socket); // Should always exist here
+        console.log(`User ${senderId} created room: ${roomId}`);
 
-        // remove from old room
+        // Remove user from any previous room
         const oldRoomId = socketRoomMap.get(socket);
-
         if(oldRoomId){
-          roomMap.get(oldRoomId)?.delete(socket)
-          
-          if(roomMap.get(oldRoomId)?.size === 0){
+          const oldRoom = roomMap.get(oldRoomId);
+          oldRoom?.delete(socket);
+          // Clean up empty room
+          if(oldRoom?.size === 0){
             roomMap.delete(oldRoomId);
-          } 
+            console.log(`Cleaned up empty room: ${oldRoomId}`);
+          }
         }
 
-        // adding to new room
+        // Add user to the new room
         if(!roomMap.has(roomId)){
-          roomMap.set(roomId, new Set())
+          // Create room if it doesn't exist
+          const newRoom = new Set([socket]);
+          roomMap.set(roomId, newRoom);
+        } else {
+          // Add to existing room
+          roomMap.get(roomId)?.add(socket);
         }
-        roomMap.get(roomId)!.add(socket);
-        socketRoomMap.set(socket, roomId);
+        socketRoomMap.set(socket, roomId); // Update user's current room
+
       }
 
-      if(parsedMessage.type === "join"){
+      // Handle room joining
+      else if(parsedMessage.type === "join"){
         const roomId = parsedMessage.payload.roomId;
-        console.log(`User trying to join room: ${roomId}`)
+        const senderId = socketToUserId.get(socket);
+
+        console.log(`User ${senderId} attempting to join room: ${roomId}`);
 
         if(roomMap.has(roomId)){
-          // remove from old room
+          // Remove user from previous room
           const oldRoomId = socketRoomMap.get(socket);
-
           if (oldRoomId) {
-            roomMap.get(oldRoomId)?.delete(socket)
-
-            if (roomMap.get(oldRoomId)?.size === 0) {
+            const oldRoom = roomMap.get(oldRoomId);
+            oldRoom?.delete(socket);
+             // Clean up empty room
+            if (oldRoom?.size === 0) {
               roomMap.delete(oldRoomId);
+              console.log(`Cleaned up empty room: ${oldRoomId}`);
             }
           }
 
+          // Add user to the target room
           roomMap.get(roomId)?.add(socket);
-          socketRoomMap.set(socket, roomId);
+          socketRoomMap.set(socket, roomId); // Update user's current room
 
-          console.log(`User joined room: ${roomId}`);
+          console.log(`User ${senderId} successfully joined room: ${roomId}`);
 
         } else {
-
+          // Room does not exist error
           socket.send(JSON.stringify({
             type: "error",
-            message: "Room does not exist"
+            message: `Room "${roomId}" does not exist.`
           }));
-
-          console.log(`User could not join: ${roomId}`);
-
-          return;
+          console.log(`User ${senderId} failed to join non-existent room: ${roomId}`);
+          return; // Stop processing if room doesn't exist
         }
       }
 
-      if(parsedMessage.type === "chat"){
+      // Handle chat messages
+      else if(parsedMessage.type === "chat"){
         const textData = parsedMessage.payload.message;
         const roomId = socketRoomMap.get(socket);
         const senderId = socketToUserId.get(socket);
 
-        if(!roomId || !senderId) return;
-        const getRoomMembers = roomMap.get(roomId);
-        console.log(`Room ${roomId} members: ${getRoomMembers?.size}`);
+        // Validate necessary data exists before proceeding
+        // Note: Must check for undefined specifically, as `senderId` can be 0 (falsy)
+        if(roomId === undefined || senderId === undefined) {
+          console.error(`Error sending chat: Missing roomId (${roomId}) or senderId (${senderId}) for socket.`);
+           // Optionally inform the client
+           socket.send(JSON.stringify({ type: "error", message: "Could not send message: missing user or room association." }));
+          return;
+        }
 
-        // if(getRoomMembers?.size === 1){
-        //   console.log("Your the only one in your room :(");
-        //   return;
-        // }
+        const roomMembers = roomMap.get(roomId);
+        if(!roomMembers) {
+           console.error(`Error sending chat: Room ${roomId} not found in roomMap.`);
+           // Optionally inform the client
+           socket.send(JSON.stringify({ type: "error", message: `Could not send message: room "${roomId}" not found.` }));
+          return;
+        }
 
-        getRoomMembers?.forEach(client => {
+        // send message to all clients in the room
+        // console.log(`Broadcasting message from user ${senderId} to room ${roomId} (${roomMembers.size} members)`);
+        roomMembers.forEach(client => {
           if(client.readyState === WebSocket.OPEN){
             client.send(JSON.stringify({
               type: "chat",
               payload: {
-                senderId,
+                senderId: senderId,
                 message: textData
               }
             }));
           } else {
-            console.log(`There was an error connecting to the WSS`)
-          };
+            // Log if a client in the room is not connected (might indicate cleanup needed)
+            console.warn(`Skipping message send to non-open socket in room ${roomId}`);
+          }
         });
       };
+
     } catch(error) {
-      console.error(`Error processing messgage: ${error}`)
+      console.error(`Error processing message: ${error instanceof Error ? error.message : String(error)}`);
+    
+      socket.send(JSON.stringify({ type: "error", message: "Error processing your request." }));
     }
   })
 
   socket.on("close", () => {
     const userId = socketToUserId.get(socket);
-    console.log(`User ${userId} disconnected`)
     const roomId = socketRoomMap.get(socket);
+    console.log(`User ${userId !== undefined ? userId : '?'} disconnected (was in room ${roomId ? roomId : 'none'})`);
 
+    // Clean up user from roomMap
     if(roomId){
       const roomSet = roomMap.get(roomId);
       if(roomSet){
-        roomSet.delete(socket)
+        roomSet.delete(socket);
+        // Clean up empty room
         if(roomSet.size === 0){
           roomMap.delete(roomId);
+          console.log(`Cleaned up empty room: ${roomId}`);
         }
       }
     }
+    // Clean up user from tracking maps
     socketToUserId.delete(socket);
     socketRoomMap.delete(socket);
   })
+
+  socket.on('error', (error) => {
+    const userId = socketToUserId.get(socket);
+    console.error(`WebSocket error for user ${userId !== undefined ? userId : '?'}: ${error.message}`);
+    
+  });
 })
+
+console.log(`WebSocket server started on port ${wss.options.port}`);

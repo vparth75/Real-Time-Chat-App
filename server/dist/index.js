@@ -16,13 +16,14 @@ wss.on("connection", (socket) => {
         payload: { userId }
     }));
     socket.on("message", (message) => {
-        var _a, _b, _c, _d, _e;
+        var _a, _b, _c, _d, _e, _f, _g;
         try {
             const parsedMessage = JSON.parse(message);
             console.log(parsedMessage);
             if (parsedMessage.type === "create") {
                 const roomId = parsedMessage.payload.roomId;
-                console.log(`User created room: ${roomId}`);
+                const senderId = socketToUserId.get(socket);
+                console.log(`User ${senderId} created room: ${roomId}`);
                 // remove from old room
                 const oldRoomId = socketRoomMap.get(socket);
                 if (oldRoomId) {
@@ -33,10 +34,15 @@ wss.on("connection", (socket) => {
                 }
                 // adding to new room
                 if (!roomMap.has(roomId)) {
-                    roomMap.set(roomId, new Set());
+                    const newRoom = new Set([socket]);
+                    roomMap.set(roomId, newRoom);
                 }
-                roomMap.get(roomId).add(socket);
+                else {
+                    (_c = roomMap.get(roomId)) === null || _c === void 0 ? void 0 : _c.add(socket);
+                }
                 socketRoomMap.set(socket, roomId);
+                console.log(`Room ${roomId} members after creation: ${(_d = roomMap.get(roomId)) === null || _d === void 0 ? void 0 : _d.size}`);
+                console.log(`Creator's room mapping: ${socketRoomMap.get(socket)}`);
             }
             if (parsedMessage.type === "join") {
                 const roomId = parsedMessage.payload.roomId;
@@ -45,12 +51,12 @@ wss.on("connection", (socket) => {
                     // remove from old room
                     const oldRoomId = socketRoomMap.get(socket);
                     if (oldRoomId) {
-                        (_c = roomMap.get(oldRoomId)) === null || _c === void 0 ? void 0 : _c.delete(socket);
-                        if (((_d = roomMap.get(oldRoomId)) === null || _d === void 0 ? void 0 : _d.size) === 0) {
+                        (_e = roomMap.get(oldRoomId)) === null || _e === void 0 ? void 0 : _e.delete(socket);
+                        if (((_f = roomMap.get(oldRoomId)) === null || _f === void 0 ? void 0 : _f.size) === 0) {
                             roomMap.delete(oldRoomId);
                         }
                     }
-                    (_e = roomMap.get(roomId)) === null || _e === void 0 ? void 0 : _e.add(socket);
+                    (_g = roomMap.get(roomId)) === null || _g === void 0 ? void 0 : _g.add(socket);
                     socketRoomMap.set(socket, roomId);
                     console.log(`User joined room: ${roomId}`);
                 }
@@ -67,20 +73,38 @@ wss.on("connection", (socket) => {
                 const textData = parsedMessage.payload.message;
                 const roomId = socketRoomMap.get(socket);
                 const senderId = socketToUserId.get(socket);
-                if (!roomId || !senderId)
+                console.log(`Chat attempt from user ${senderId} in room ${roomId}`);
+                console.log(`Socket exists in socketRoomMap: ${socketRoomMap.has(socket)}`);
+                console.log(`Socket exists in socketToUserId: ${socketToUserId.has(socket)}`);
+                console.log(`Actual roomId from map: ${socketRoomMap.get(socket)}`);
+                console.log(`Actual senderId from map: ${socketToUserId.get(socket)}`);
+                // Let's try to get the values directly from the maps
+                const directRoomId = socketRoomMap.get(socket);
+                const directSenderId = socketToUserId.get(socket);
+                // Check specifically for undefined, as 0 is a valid senderId
+                if (directRoomId === undefined || directSenderId === undefined) {
+                    // Log the specific missing value for clarity
+                    if (directRoomId === undefined) {
+                        console.log(`Missing roomId. Socket not found in socketRoomMap.`);
+                    }
+                    if (directSenderId === undefined) {
+                        console.log(`Missing senderId. Socket not found in socketToUserId.`);
+                    }
                     return;
-                const getRoomMembers = roomMap.get(roomId);
-                console.log(`Room ${roomId} members: ${getRoomMembers === null || getRoomMembers === void 0 ? void 0 : getRoomMembers.size}`);
-                // if(getRoomMembers?.size === 1){
-                //   console.log("Your the only one in your room :(");
-                //   return;
-                // }
-                getRoomMembers === null || getRoomMembers === void 0 ? void 0 : getRoomMembers.forEach(client => {
+                }
+                const getRoomMembers = roomMap.get(directRoomId);
+                if (!getRoomMembers) {
+                    console.log(`Room ${directRoomId} not found in roomMap`);
+                    return;
+                }
+                console.log(`Room ${directRoomId} members: ${getRoomMembers.size}`);
+                console.log(`Current member's socket in room: ${getRoomMembers.has(socket)}`);
+                getRoomMembers.forEach(client => {
                     if (client.readyState === ws_1.WebSocket.OPEN) {
                         client.send(JSON.stringify({
                             type: "chat",
                             payload: {
-                                senderId,
+                                senderId: directSenderId,
                                 message: textData
                             }
                         }));
@@ -88,7 +112,6 @@ wss.on("connection", (socket) => {
                     else {
                         console.log(`There was an error connecting to the WSS`);
                     }
-                    ;
                 });
             }
             ;

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 
 interface MessageData{
   senderId: number;
@@ -12,6 +12,7 @@ interface ChatsProps {
 
 export default function Chats({ ws, ownUserId }: ChatsProps) {
   const [messages, setMessages] = useState<MessageData[]>([]);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!ws) {
@@ -58,10 +59,16 @@ export default function Chats({ ws, ownUserId }: ChatsProps) {
     }
   }, [ws]);
 
+  useEffect(() => {
+    if (messagesContainerRef.current) {
+      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+    }
+  }, [messages]);
+
   console.log("Current messages in state:", messages);
 
   return (
-    <div className="flex flex-col border border-neutral-700 rounded-lg h-full overflow-y-auto p-4">
+    <div ref={messagesContainerRef} className="flex flex-col border border-neutral-700 rounded-lg h-full overflow-y-auto p-4">
       {messages.length === 0 ? (
         <div className="text-gray-500 self-center my-auto">No messages yet</div>
       ) : (
